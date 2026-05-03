@@ -1,0 +1,13 @@
+# RACE DASH PRO - Авторы проекта
+
+Основной автор:
+- Бухлаков Евгений <buhlakov@race-dash.ru>
+  Telegram: @race_dash_pro
+  GitHub: buhlakov
+
+Благодарности:
+- Сообществу Raspberry Pi Foundation
+- Разработчикам PyQt5
+- Команде DeepSeek за API
+- Всем тестировщикам и пользователям
+- Open source сообществу
