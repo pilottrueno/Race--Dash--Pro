@@ -1,0 +1,492 @@
+Теперь есть кнопка **📄 ЛОГИ**, которая открывает панель с историей минутных логов, прямо как в видеорегистраторе. Запись ведётся автоматически раз в секунду, каждую минуту создаётся новый лог, старые (больше 60) удаляются. Логи можно смотреть в таблице или скачать как `.txt`.
+
+**Как это работает:**
+- Раз в секунду (только в демо‑режиме) снимается полный снимок всех показателей и сохраняется в текущий минутный массив.
+- По истечении 60 реальных секунд текущая минута закрывается, добавляется в список, а если логов больше 60 — самый старый удаляется.
+- В панели логов отображается список: время начала, количество записей, кнопки **👁 СМОТРЕТЬ** (показывает таблицу) и **💾 СКАЧАТЬ TXT**.
+- Таблица и скачанный файл содержат все столбцы: RPM, Boost, Coolant и т.д.
+
+Вот полный код с интегрированным логированием:
+
+```html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>RACE DASH PRO – Логи</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            background: radial-gradient(circle at 20% 30%, #0a0f1a, #03060a);
+            font-family: 'Monaco', 'Courier New', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            transition: background 0.3s;
+        }
+        .dashboard {
+            max-width: 800px;
+            width: 100%;
+            margin: 0 auto;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(4px);
+            border-radius: 24px;
+            padding: 16px;
+            border: 1px solid rgba(0, 255, 255, 0.25);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+            transition: background 0.3s, border-color 0.3s;
+        }
+        .gauge-container {
+            position: relative;
+            width: 100%;
+            max-width: 360px;
+            margin: 0 auto 10px;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        .rpm-text {
+            position: absolute;
+            bottom: 30%;
+            left: 0; right: 0;
+            text-align: center;
+            font-size: 52px;
+            font-weight: 900;
+            color: #00ffcc;
+            text-shadow: 0 0 10px #00ffcc;
+        }
+        .rpm-label {
+            position: absolute;
+            bottom: 22%;
+            left: 0; right: 0;
+            text-align: center;
+            font-size: 16px;
+            color: #ff3366;
+            letter-spacing: 2px;
+            font-weight: bold;
+        }
+        .shift-lights {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin: -5px 0 12px;
+        }
+        .shift-led {
+            width: 60px;
+            height: 8px;
+            border-radius: 4px;
+            background: #1a1f2a;
+            transition: 0.1s;
+        }
+
+        .primary-gauges {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin: 8px 0 14px;
+            flex-wrap: wrap;
+        }
+        .primary-gauge-card {
+            background: #0b0e14;
+            border-radius: 20px;
+            padding: 10px 20px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            text-align: center;
+            min-width: 140px;
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            height: 90px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .primary-gauge-fill {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 0%;
+            opacity: 0.25;
+
+
+z-index: 0;
+            transition: width 0.2s ease-out;
+        }
+        .primary-gauge-title {
+            font-size: 11px;
+            color: #8a8f99;
+            letter-spacing: 1px;
+            font-weight: 600;
+            margin-bottom: 2px;
+            position: relative;
+            z-index: 1;
+        }
+        .primary-gauge-value {
+            font-size: 48px;
+            font-weight: 900;
+            font-family: monospace;
+            color: #ffffff;
+            text-shadow: 0 0 8px rgba(255,255,255,0.3);
+            line-height: 1;
+            position: relative;
+            z-index: 1;
+            min-width: 3em;
+            display: inline-block;
+            text-align: right;
+        }
+        .primary-gauge-unit {
+            font-size: 14px;
+            color: #cccccc;
+            font-weight: bold;
+            margin-left: 4px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .sensors-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px 20px;
+            margin-bottom: 12px;
+        }
+        .sensor-col {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .sensor-card {
+            background: #14171c;
+            border-radius: 16px;
+            padding: 6px 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 4px solid;
+            transition: 0.1s;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
+            height: 48px;
+        }
+        .sensor-fill {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 0%;
+            opacity: 0.3;
+            z-index: 0;
+            transition: width 0.2s ease-out;
+        }
+        .sensor-info {
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            z-index: 1;
+        }
+        .sensor-title {
+            font-size: 11px;
+            color: #8a8f99;
+            letter-spacing: 1px;
+            font-weight: 600;
+        }
+        .sensor-value {
+            font-size: 26px;
+            font-weight: 800;
+            font-family: monospace;
+            color: #ffffff;
+            position: relative;
+            z-index: 1;
+            min-width: 3em;
+            display: inline-block;
+            text-align: right;
+        }
+        .sensor-unit {
+            font-size: 11px;
+            color: #cccccc;
+            margin-left: 3px;
+            position: relative;
+            z-index: 1;
+        }
+        .flex-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin: 8px 0 5px;
+            flex-wrap: wrap;
+        }
+        button {
+            background: #1a1f2a;
+            border: 1px solid #00ffff;
+            color: #00ffff;
+            border-radius: 30px;
+            padding: 4px 14px;
+            font-family: monospace;
+            font-weight: bold;
+            font-size: 11px;
+            cursor: pointer;
+            transition: 0.1s;
+        }
+        button:active {
+            transform: scale(0.96);
+        }
+        .reset-btn {
+            background: #ff3366;
+            border-color: #ff3366;
+            color: white;
+        }
+        .graph-btn {
+            background: #2a2e35;
+            border: 1px solid #00ffff;
+            color: #00ffff;
+        }
+        .theme-btn {
+            background: #2a2e35;
+            border: 1px solid #ffcc00;
+            color: #ffcc00;
+        }
+        .log-btn {
+            background: #2a2e35;
+            border: 1px solid #ff9900;
+            color: #ff9900;
+        }
+        .info-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #0d1117;
+            border-top: 1px solid #00ffff;
+
+
+border-bottom: 1px solid #00ffff;
+            padding: 6px 12px;
+            border-radius: 30px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #00ffcc;
+        }
+        .info-bar span {
+            color: #ffcc00;
+        }
+        .gps-status {
+            color: #4CAF50 !important;
+            font-weight: bold;
+        }
+
+        .graphs-panel, .logs-panel {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            flex-direction: column;
+            padding: 16px;
+            overflow-y: auto;
+        }
+        .graphs-panel.active, .logs-panel.active {
+            display: flex;
+        }
+        .graphs-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 20px;
+        }
+        .graph-card {
+            background: white;
+            border-radius: 16px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        .graph-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .graph-title {
+            color: #e63946;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .graph-x-toggle {
+            background: #f0f0f0;
+            border: 1px solid #aaa;
+            border-radius: 12px;
+            font-size: 9px;
+            padding: 2px 8px;
+            cursor: pointer;
+            font-family: monospace;
+            color: #333;
+        }
+        .graph-x-toggle.active {
+            background: #00b4d8;
+            color: white;
+            border-color: #0077b6;
+        }
+        .graph-canvas {
+            width: 100%;
+            height: 140px;
+            border-radius: 8px;
+            display: block;
+        }
+        .close-btn {
+            background: #ff3366;
+            border: none;
+            color: white;
+            float: right;
+            margin: 10px;
+            padding: 6px 16px;
+            border-radius: 30px;
+            cursor: pointer;
+        }
+
+        /* Стили для панели логов */
+        .log-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 20px;
+        }
+        .log-entry {
+            background: #1e1e2f;
+            border-radius: 12px;
+            padding: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #ccc;
+            border: 1px solid #444;
+        }
+        .log-entry span {
+            font-size: 12px;
+        }
+        .log-entry-buttons button {
+            margin-left: 6px;
+            font-size: 10px;
+            padding: 3px 10px;
+        }
+        .log-table-container {
+            margin-top: 20px;
+            background: #1e1e2f;
+            border-radius: 12px;
+            padding: 10px;
+            max-height: 60vh;
+            overflow: auto;
+        }
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+            color: #ddd;
+        }
+        .log-table th, .log-table td {
+            border: 1px solid #444;
+            padding: 3px 5px;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .log-table th {
+            background: #333;
+            color: #ffcc00;
+        }
+        .back-to-list-btn {
+            margin-bottom: 10px;
+        }
+
+        max-width: 700px {
+            .sensor-value { font-size: 22px; }
+            .rpm-text { font-size: 46px; }
+            .graphs-grid { gap: 10px; }
+            .graph-canvas { height: 110px; }
+
+
+.primary-gauge-value { font-size: 38px; }
+            .sensor-card { height: 42px; }
+            .primary-gauge-card { height: 80px; }
+        }
+    </style>
+</head>
+<body>
+<div class="dashboard" id="dashboard">
+    <div class="gauge-container">
+        <canvas id="tacho" width="400" height="400"></canvas>
+        <div class="rpm-text" id="rpmDisplay">0</div>
+        <div class="rpm-label">RPM</div>
+    </div>
+    <div class="shift-lights">
+        <div class="shift-led" id="l1"></div>
+        <div class="shift-led" id="l2"></div>
+        <div class="shift-led" id="l3"></div>
+    </div>
+
+    <div class="primary-gauges">
+        <div class="primary-gauge-card">
+            <div class="primary-gauge-fill" id="fill-boostPrimaryVal" style="background:#ffcc00;"></div>
+            <div class="primary-gauge-title">BOOST</div>
+            <div><span class="primary-gauge-value boost-color" id="boostPrimaryVal">0.00</span><span class="primary-gauge-unit">bar</span></div>
+        </div>
+        <div class="primary-gauge-card">
+            <div class="primary-gauge-fill" id="fill-oilPressPrimaryVal" style="background:#00b4d8;"></div>
+            <div class="primary-gauge-title">OIL PRESS</div>
+            <div><span class="primary-gauge-value oil-color" id="oilPressPrimaryVal">0.0</span><span class="primary-gauge-unit">bar</span></div>
+        </div>
+    </div>
+
+    <div class="sensors-grid">
+        <div class="sensor-col">
+            <div class="sensor-card" style="border-left-color:#ffcc00">
+                <div class="sensor-fill" id="fill-boostVal" style="background:#ffcc00;"></div>
+                <div class="sensor-info"><div class="sensor-title">BOOST</div><div class="sensor-value" id="boostVal">0.00</div></div>
+                <div class="sensor-unit">bar</div>
+            </div>
+            <div class="sensor-card" style="border-left-color:#00ffcc">
+                <div class="sensor-fill" id="fill-coolantVal" style="background:#00ffcc;"></div>
+                <div class="sensor-info"><div class="sensor-title">COOLANT</div><div class="sensor-value" id="coolantVal">0</div></div>
+                <div class="sensor-unit">°C</div>
+            </div>
+            <div class="sensor-card" style="border-left-color:#ff6600">
+                <div class="sensor-fill" id="fill-oilVal" style="background:#ff6600;"></div>
+                <div class="sensor-info"><div class="sensor-title">OIL TEMP</div><div class="sensor-value" id="oilVal">0</div></div>
+                <div class="sensor-unit">°C</div>
+            </div>
+            <div class="sensor-card" style="border-left-color:#4CAF50">
+                <div class="sensor-fill" id="fill-voltVal" style="background:#4CAF50;"></div>
+                <div class="sensor-info"><div class="sensor-title">VOLTAGE</div><div class="sensor-value" id="voltVal">0.0</div></div>
+                <div class="sensor-unit">V</div>
+            </div>
+            <div class="sensor-card" style="border-left-color:#ff8888">
+                <div class="sensor-fill" id="fill-egtVal" style="background:#ff8888;"></div>
+                <div class="sensor-info"><div class="sensor-title">EGT</div><div class="sensor-value" id="egtVal">0</div></div>
+                <div class="sensor-unit">°C</div>
+            </div>
+            <div class="sensor-card" style="border-left-color:#2ecc71">
+                <div class="sensor-fill" id="fill-lambdaVal" style="background:#2ecc71;"></div>
+                <div class="sensor-info"><div class="sensor-title">LAMBDA</div><div class="sensor-value" id="lambdaVal">0.00</div></div>
+                <div class="sensor-unit">λ</div>
+            </div>
+        </div>
+        <div class="sensor-col">
+            <div class="sensor-card" style="border-left-color:#e67e22">
+                <div class="sensor-fill" id="fill-afrVal" style="background:#e67e22;"></div>
+                <div class="sensor-info"><div class="sensor-title">AFR</div><div class="sensor-value" id="afrVal">0.0</di
+
+
